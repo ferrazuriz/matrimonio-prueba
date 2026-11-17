@@ -49,6 +49,33 @@ button { font: inherit; }
 .pestanas button[aria-current=true] { color: var(--acento); font-weight: bold; box-shadow: inset 0 3px 0 var(--acento); }
 .plano { width: 100%; border-radius: 12px; border: 1px solid var(--linea); margin-top: 8px; }
 .aviso { text-align: center; padding: 28px 12px; }
+
+/* Esquemas */
+.plano-svg { width: 100%; height: auto; display: block; }
+.s-altar { fill: var(--acento); }
+.s-sector { fill: #efe5d9; stroke: var(--linea); stroke-width: 1; }
+.s-on, .s-mesa.s-on { fill: var(--acento); stroke: #5e3a2a; stroke-width: 2; }
+.s-mesa { fill: #efe5d9; stroke: var(--linea); stroke-width: 1; }
+.s-txt { fill: var(--texto); font-size: 13px; font-family: Georgia, serif; }
+.s-claro { fill: #fff; }
+.s-chico { font-size: 10px; }
+.s-titulo { font-size: 13px; fill: var(--suave); }
+.nota { font-size: .8rem; color: var(--suave); text-align: center; margin: 4px 0 0; }
+
+/* Bingo */
+.bingo { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 12px 0; }
+.casilla {
+  aspect-ratio: 1; display: flex; align-items: center; justify-content: center; text-align: center;
+  padding: 6px; font: inherit; font-size: .78rem; line-height: 1.2; color: var(--texto);
+  background: var(--tarjeta); border: 1px solid var(--linea); border-radius: 12px; cursor: pointer; position: relative;
+}
+.casilla[aria-pressed=true] { background: var(--ok); color: #fff; border-color: var(--ok); }
+.casilla[aria-pressed=true]::after { content: "✓"; position: absolute; top: 4px; right: 8px; font-size: .9rem; }
+.estado-bingo { text-align: center; min-height: 1.6em; color: var(--ok); font-weight: bold; }
+a.boton.foto, button.boton.foto {
+  text-align: center; text-decoration: none; background: var(--acento); color: #fff; border-color: var(--acento);
+}
+.aviso-foto { text-align: center; color: var(--suave); font-size: .9rem; margin: 6px 0 0; }
 </style></head><body>
 <header class="cabecera"><h1 id="titulo"></h1><p id="subtitulo"></p></header>
 <main><section id="vista-ceremonia" class="vista" hidden></section><section id="vista-cocktel" class="vista" hidden></section><section id="vista-cena" class="vista" hidden></section><section id="vista-fiesta" class="vista" hidden></section></main>
@@ -69,15 +96,38 @@ window.fetch = async (url) => {
     const c = (u.searchParams.get("c")||"").toUpperCase();
     return DATOS.mesas[c] ? _resp({mesa:{nombre:DATOS.mesas[c], codigo:c}}) : _resp({error:"no existe"},404);
   }
+  if (u.pathname === "/api/mesas") return _resp({mesas:Object.values(DATOS.mesas).map(nombre=>({nombre}))});
   return _resp({error:"?"},404);
-};</script><script>// Textos y planos de la página. Edita aquí sin tocar el resto del código.
+};</script><script>// Textos, link de fotos y consignas del bingo. Edita aquí sin tocar el resto del código.
 window.CONFIG = {
   titulo: "Nuestro matrimonio",
   subtitulo: "Encuentra tu lugar y comparte tus fotos",
-  // Cuando tengas los planos, déjalos en public/planos/ y pon la ruta. Si es null no se muestra.
-  planos: {
-    ceremonia: null, // ej: "/planos/ceremonia.png"
-    cena: null,      // ej: "/planos/cena.png"
+
+  // Link para subir fotos. Mientras esté vacío, el botón avisa que llegará pronto.
+  fotosUrl: "",
+
+  // Sectores de la ceremonia, de adelante hacia atrás (en cada lado: Novia / Novio).
+  sectores: ["A", "B", "C"],
+
+  // Planos reales opcionales (déjalos en public/planos/). null = no se muestra.
+  planos: { ceremonia: null, cena: null },
+
+  // Consignas del bingo (9 casillas por mesa, elegidas al azar según la mesa).
+  bingo: {
+    cena: [
+      "Selfie de toda la mesa", "Foto con los novios", "Brindis con tu mesa",
+      "El plato que más te gustó", "Alguien riendo a carcajadas", "La decoración de tu mesa",
+      "Foto con alguien de otra mesa", "Los zapatos más elegantes", "El postre",
+      "Un abrazo entre dos de tu mesa", "Foto con la persona más joven de tu mesa", "Tu mesa haciendo cheers",
+      "La mejor pose de tu mesa", "Alguien emocionado", "Foto con un familiar de los novios",
+    ],
+    fiesta: [
+      "Baile en ronda", "Selfie en la pista", "Foto con los novios bailando",
+      "Alguien cantando a todo pulmón", "Tu mejor paso de baile", "Abrazo grupal",
+      "Foto con alguien que no veías hace años", "Trencito de baile", "Brindis en la pista",
+      "El más animado de la fiesta", "Foto con los novios y tu mesa", "Alguien bailando con los zapatos en la mano",
+      "Pose de película con amigos", "Los novios en el centro de la pista", "Selfie con el cielo o las luces",
+    ],
   },
 };
 </script><script>(() => {
@@ -137,12 +187,89 @@ window.CONFIG = {
   const cambiar = () => el("button", { class: "boton secundario", onclick: olvidar }, "No soy yo / buscar otro nombre");
 
   function plano(ruta) { return ruta ? el("img", { class: "plano", src: ruta, alt: "Plano" }) : ""; }
+  const norm = (x) => String(x || "").trim().toLowerCase();
+
+  // ---------- esquemas (SVG) ----------
+  const NS = "http://www.w3.org/2000/svg";
+  function svg(tag, attrs = {}, ...hijos) {
+    const n = document.createElementNS(NS, tag);
+    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
+    for (const h of hijos) n.append(h);
+    return n;
+  }
+
+  function planoCeremonia(i) {
+    const sec = cfg.sectores, alto = 52, sep = 8, y0 = 70;
+    const H = y0 + sec.length * (alto + sep) + 40;
+    const s = svg("svg", { viewBox: `0 0 320 ${H}`, class: "plano-svg", role: "img", "aria-label": "Esquema de la ceremonia" });
+    s.append(svg("rect", { x: 105, y: 10, width: 110, height: 30, rx: 6, class: "s-altar" }),
+             svg("text", { x: 160, y: 30, "text-anchor": "middle", class: "s-txt s-claro" }, "Altar"));
+    for (const [lado, x] of [["Novia", 20], ["Novio", 180]]) {
+      s.append(svg("text", { x: x + 60, y: 60, "text-anchor": "middle", class: "s-txt s-titulo" }, lado));
+      sec.forEach((letra, k) => {
+        const y = y0 + k * (alto + sep);
+        const on = i && norm(i.lado) === norm(lado) && norm(i.sector) === norm(letra);
+        s.append(svg("rect", { x, y, width: 120, height: alto, rx: 8, class: on ? "s-sector s-on" : "s-sector" }),
+                 svg("text", { x: x + 60, y: y + (on ? 24 : 31), "text-anchor": "middle", class: on ? "s-txt s-claro" : "s-txt" }, "Sector " + letra));
+        if (on) s.append(svg("text", { x: x + 60, y: y + 41, "text-anchor": "middle", class: "s-txt s-claro s-chico" }, "Tú estás aquí"));
+      });
+    }
+    s.append(svg("text", { x: 160, y: H - 10, "text-anchor": "middle", class: "s-txt s-titulo" }, "Entrada"));
+    return el("div", { class: "tarjeta" }, s, el("p", { class: "nota" }, "Esquema referencial, no está a escala."));
+  }
+
+  function planoMesas(nombres, mia) {
+    const cols = 4, dy = 84, filas = Math.ceil(nombres.length / cols);
+    const s = svg("svg", { viewBox: `0 0 320 ${filas * dy + 16}`, class: "plano-svg", role: "img", "aria-label": "Esquema de mesas" });
+    nombres.forEach((nombre, k) => {
+      const cx = 40 + (k % cols) * 80, cy = 38 + Math.floor(k / cols) * dy, on = mia && nombre === mia;
+      s.append(svg("circle", { cx, cy, r: 28, class: on ? "s-mesa s-on" : "s-mesa" }),
+               svg("text", { x: cx, y: cy + 5, "text-anchor": "middle", class: on ? "s-txt s-claro" : "s-txt" }, nombre.replace(/^mesa\s*/i, "")));
+      if (on) s.append(svg("text", { x: cx, y: cy + 46, "text-anchor": "middle", class: "s-txt s-chico" }, "Tu mesa"));
+    });
+    return el("div", { class: "tarjeta" }, el("div", { class: "suave" }, "Mesas de la cena"), s, el("p", { class: "nota" }, "Esquema referencial, no está a escala."));
+  }
+
+  // ---------- botón de fotos ----------
+  function botonFotos() {
+    if (cfg.fotosUrl) return el("a", { class: "boton foto", href: cfg.fotosUrl, target: "_blank", rel: "noopener" }, "Subir fotos");
+    const aviso = el("p", { class: "aviso-foto" });
+    const b = el("button", { class: "boton foto", onclick: () => { aviso.textContent = "El link para subir fotos estará disponible muy pronto."; } }, "Subir fotos");
+    return el("div", {}, b, aviso);
+  }
+
+  // ---------- bingo ----------
+  function xmur3(str) { let h = 1779033703 ^ str.length; for (let i = 0; i < str.length; i++) { h = Math.imul(h ^ str.charCodeAt(i), 3432918353); h = (h << 13) | (h >>> 19); } return () => { h = Math.imul(h ^ (h >>> 16), 2246822507); h = Math.imul(h ^ (h >>> 13), 3266489909); return (h ^= h >>> 16) >>> 0; }; }
+  function mulberry32(a) { return () => { a |= 0; a = (a + 0x6D2B79F5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a); t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; }
+  const LINEAS = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+
+  function bingo(momento) {
+    const clave = (estado.mesa ? estado.mesa.codigo : "general") + ":" + momento;
+    const azar = mulberry32(xmur3(clave)());
+    const banco = [...cfg.bingo[momento]];
+    for (let k = banco.length - 1; k > 0; k--) { const j = Math.floor(azar() * (k + 1)); [banco[k], banco[j]] = [banco[j], banco[k]]; }
+    const casillas = banco.slice(0, 9);
+    estado.bingo = estado.bingo || {};
+    const marcadas = new Set(estado.bingo[clave] || []);
+    const estadoTxt = el("p", { class: "estado-bingo" });
+    const botones = casillas.map((texto, k) => el("button", { class: "casilla", "aria-pressed": String(marcadas.has(k)), onclick: () => {
+      marcadas.has(k) ? marcadas.delete(k) : marcadas.add(k);
+      botones[k].setAttribute("aria-pressed", String(marcadas.has(k)));
+      estado.bingo[clave] = [...marcadas]; guardar(); revisar();
+    } }, texto));
+    function revisar() {
+      const lineas = LINEAS.filter((l) => l.every((k) => marcadas.has(k))).length;
+      estadoTxt.textContent = marcadas.size === 9 ? "¡Tablero completo! Avísales a los novios." : lineas ? (lineas === 1 ? "¡Línea completa!" : `¡${lineas} líneas completas!`) : "";
+    }
+    revisar();
+    return el("div", {}, el("div", { class: "bingo" }, ...botones), estadoTxt);
+  }
 
   // ---------- vistas ----------
   function vistaCeremonia(c) {
     c.append(el("h2", {}, "Ceremonia"));
     const i = estado.invitado;
-    if (!i) { c.append(buscador(elegir)); c.append(plano(cfg.planos.ceremonia)); return; }
+    if (!i) { c.append(buscador(elegir), planoCeremonia(null), plano(cfg.planos.ceremonia), botonFotos()); return; }
     c.append(el("p", { class: "saludo" }, "Hola, " + i.nombre));
     if (i.lado || i.sector) {
       c.append(el("div", { class: "tarjeta" },
@@ -151,34 +278,42 @@ window.CONFIG = {
     } else {
       c.append(el("div", { class: "tarjeta" }, "Aún no tenemos un lugar asignado para ti en la ceremonia. Siéntate donde prefieras."));
     }
-    c.append(plano(cfg.planos.ceremonia), cambiar());
+    c.append(planoCeremonia(i), plano(cfg.planos.ceremonia), botonFotos(), cambiar());
   }
 
   function vistaCocktel(c) {
     c.append(el("h2", {}, "Cóctel"));
     const i = estado.invitado, m = estado.mesa;
-    if (!i && !m) { c.append(buscador(elegir)); c.append(plano(cfg.planos.cena)); return; }
+    if (!i && !m) c.append(buscador(elegir));
     if (i) c.append(el("p", { class: "saludo" }, "Hola, " + i.nombre));
     if (m) {
       c.append(el("div", { class: "tarjeta" },
         el("div", { class: "suave" }, "Tu mesa en la cena"),
         el("div", { class: "grande" }, m.nombre)));
-    } else {
+    } else if (i) {
       c.append(el("div", { class: "tarjeta" }, i.fiesta ? "No tienes mesa en la cena. ¡Te esperamos en la fiesta!" : "Aún no tenemos una mesa asignada para ti."));
     }
-    c.append(plano(cfg.planos.cena));
+    const hueco = el("div");
+    c.append(hueco, plano(cfg.planos.cena), botonFotos());
     if (i) c.append(cambiar());
+    fetch("/api/mesas").then((r) => r.json()).then(({ mesas }) => {
+      const nombres = mesas.map((x) => x.nombre).sort((a, b) => a.localeCompare(b, "es", { numeric: true }));
+      if (nombres.length) hueco.replaceChildren(planoMesas(nombres, m && m.nombre));
+    }).catch(() => {});
   }
 
-  function vistaProximamente(c, titulo, texto) {
-    c.append(el("h2", {}, titulo), el("div", { class: "tarjeta aviso" }, texto));
+  function vistaBingo(c, momento, titulo, intro) {
+    c.append(el("h2", {}, titulo), el("p", { class: "suave" }, intro));
+    if (estado.mesa) c.append(el("p", { class: "saludo" }, "Bingo de " + estado.mesa.nombre));
+    else c.append(el("p", { class: "nota" }, "Busca tu nombre en Ceremonia o Cóctel para tener el tablero de tu mesa."));
+    c.append(bingo(momento), botonFotos());
   }
 
   const PINTAR = {
     ceremonia: vistaCeremonia,
     cocktel: vistaCocktel,
-    cena: (c) => vistaProximamente(c, "Cena", "Aquí encontrarás el bingo de tu mesa. Se abrirá el día del matrimonio."),
-    fiesta: (c) => vistaProximamente(c, "Fiesta", "Aquí encontrarás el bingo de baile. Se abrirá el día del matrimonio."),
+    cena: (c) => vistaBingo(c, "cena", "Cena", "Toca cada casilla cuando saques esa foto con tu mesa."),
+    fiesta: (c) => vistaBingo(c, "fiesta", "Fiesta", "Toca cada casilla cuando saques esa foto en la pista."),
   };
 
   // ---------- navegación ----------
