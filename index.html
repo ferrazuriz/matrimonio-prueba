@@ -135,7 +135,7 @@ window.fetch = async (url) => {
     const q = u.searchParams.get("q") || "";
     const w = q.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9 ]/g," ").trim().split(/\s+/).filter(Boolean).slice(0,4);
     if (w.join("").length < 3) return _resp({resultados:[]});
-    const r = DATOS.inv.filter(i => w.every(p => i.n.includes(p))).slice(0,6).map(({n,...x})=>x);
+    const r = DATOS.inv.filter(i => w.every(p => i.n.includes(p))).slice(0,6).map(({n,mesa_codigo,...x})=>x);
     return _resp({resultados:r});
   }
   if (u.pathname === "/api/mesa") {
@@ -240,12 +240,18 @@ window.CONFIG = {
   }
 
   function elegir(x) {
-    estado.invitado = { nombre: x.nombre, lado: x.lado, sector: x.sector, mesa: x.mesa_nombre, fiesta: !!x.asiste_fiesta };
-    if (x.mesa_codigo) estado.mesa = { codigo: x.mesa_codigo, nombre: x.mesa_nombre };
+    // Ojo: no se guarda el código de la mesa. El bingo de la comida solo se abre con el QR de la mesa.
+    estado.invitado = { nombre: x.nombre, lado: x.lado, sector: x.sector, ubicacion: x.ubicacion, mesa: x.mesa_nombre, fiesta: !!x.asiste_fiesta, comida: x.asiste_comida !== 0 };
     guardar(); pintar();
   }
   function olvidar() { delete estado.invitado; delete estado.mesa; guardar(); pintar(); }
   const cambiar = () => el("button", { class: "boton secundario", onclick: olvidar }, "No soy yo / buscar otro nombre");
+
+  // Invitados con "solo fiesta": no tienen cóctel, comida ni bingo de la comida.
+  function soloFiesta(i) {
+    const h = ((cfg.eventos || {}).fiesta || {}).hora;
+    return el("div", { class: "tarjeta aviso" }, "Tu invitación es para la fiesta" + (h ? ", que parte a las " + h : "") + ". ¡Te esperamos!");
+  }
 
   function plano(ruta) { return ruta ? el("img", { class: "plano", src: ruta, alt: "Plano" }) : ""; }
   const norm = (x) => String(x || "").trim().toLowerCase();
@@ -370,21 +376,22 @@ window.CONFIG = {
     const i = estado.invitado;
     if (!i) { c.append(buscador(elegir), planoCeremonia(null), plano(cfg.planos.ceremonia), botonFotos()); return; }
     c.append(el("p", { class: "saludo" }, "Hola, " + i.nombre));
-    if (i.lado || i.sector) {
-      c.append(el("div", { class: "tarjeta" },
-        el("div", { class: "suave" }, "Tu lugar en la misa"),
-        el("div", { class: "grande" }, [i.lado && "Lado " + i.lado, i.sector && "Sector " + i.sector].filter(Boolean).join(" · "))));
+    const lugar = i.ubicacion || [i.lado && "Lado " + i.lado, i.sector && "Sector " + i.sector].filter(Boolean).join(" · ");
+    if (lugar) {
+      c.append(el("div", { class: "tarjeta" }, el("div", { class: "suave" }, "Tu lugar en la misa"), el("div", { class: "grande" }, lugar)));
     } else {
-      c.append(el("div", { class: "tarjeta" }, "Aún no tenemos un lugar asignado para ti en la misa. Siéntate donde prefieras."));
+      c.append(el("div", { class: "tarjeta" }, "No hay un lugar asignado para ti en la misa. Siéntate donde prefieras."));
     }
     c.append(planoCeremonia(i), plano(cfg.planos.ceremonia), botonFotos(), cambiar());
   }
 
   function vistaCocktel(c) {
     c.append(el("h2", {}, "Cóctel"), detalleEvento("cocktel"));
-    const i = estado.invitado, m = estado.mesa;
+    const i = estado.invitado;
+    const m = estado.mesa || (i && i.mesa ? { nombre: i.mesa } : null);
     if (!i && !m) c.append(buscador(elegir));
     if (i) c.append(el("p", { class: "saludo" }, "Hola, " + i.nombre));
+    if (i && i.comida === false) { c.append(soloFiesta(i), botonFotos(), cambiar()); return; }
     if (m) {
       c.append(el("div", { class: "tarjeta" },
         el("div", { class: "suave" }, "Tu mesa en la comida"),
@@ -419,8 +426,13 @@ window.CONFIG = {
         if (o.value) { estado.mesa = { codigo: o.value, nombre: o.textContent }; guardar(); pintar(); }
       });
     }
+    if (momento === "comida" && estado.invitado && estado.invitado.comida === false) { c.append(soloFiesta(estado.invitado), botonFotos()); return; }
+    if (momento === "comida" && !estado.mesa) {
+      const suya = estado.invitado && estado.invitado.mesa;
+      c.append(el("div", { class: "tarjeta aviso" }, "El bingo de la comida se abre con el QR que está en tu mesa." + (suya ? " Tu mesa es la " + suya.replace(/^mesa\s*/i, "") + "." : "")), botonFotos());
+      return;
+    }
     if (estado.mesa) c.append(el("p", { class: "saludo" }, "Bingo de " + estado.mesa.nombre));
-    else c.append(el("p", { class: "nota" }, "Tu nombre no tiene mesa asignada, así que verás un tablero general."));
     c.append(bingo(momento), botonFotos());
   }
 
